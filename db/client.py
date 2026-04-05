@@ -66,10 +66,15 @@ class SupabaseClient:
         self,
         telegram_id: str,
         current_book: str | None,
+        *,
+        utc_offset_minutes: int = 0,
+        telegram_language_code: str = "en",
     ) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "telegram_id": telegram_id,
             "current_book": current_book,
+            "utc_offset_minutes": utc_offset_minutes,
+            "telegram_language_code": telegram_language_code,
         }
         r = await self._request(
             "POST",
@@ -258,4 +263,117 @@ class SupabaseClient:
                 "telegram_id": f"eq.{telegram_id}",
                 "book_id": f"eq.{book_id}",
             },
+        )
+
+    async def list_reading_reminders(self, telegram_id: str) -> list[dict[str, Any]]:
+        r = await self._request(
+            "GET",
+            "/reading_reminders",
+            params={
+                "telegram_id": f"eq.{telegram_id}",
+                "select": "id,slot_key,time_local,enabled,last_notified_date",
+                "order": "slot_key.asc",
+            },
+        )
+        return r.json()
+
+    async def upsert_reading_reminder(
+        self,
+        telegram_id: str,
+        slot_key: str,
+        time_local: str,
+        *,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "telegram_id": telegram_id,
+            "slot_key": slot_key,
+            "time_local": time_local,
+            "enabled": enabled,
+            "last_notified_date": None,
+        }
+        r = await self._request(
+            "POST",
+            "/reading_reminders",
+            params={"on_conflict": "telegram_id,slot_key"},
+            json_body=payload,
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+        data = r.json()
+        if not data:
+            raise SupabaseError("Failed to upsert reminder")
+        return data[0]
+
+    async def set_reading_reminder_enabled(self, reminder_id: str, enabled: bool) -> None:
+        await self._request(
+            "PATCH",
+            "/reading_reminders",
+            params={"id": f"eq.{reminder_id}"},
+            json_body={"enabled": enabled},
+            prefer="return=minimal",
+        )
+
+    async def delete_reading_reminder(self, telegram_id: str, slot_key: str) -> None:
+        await self._request(
+            "DELETE",
+            "/reading_reminders",
+            params={
+                "telegram_id": f"eq.{telegram_id}",
+                "slot_key": f"eq.{slot_key}",
+            },
+        )
+
+    async def delete_all_reading_reminders(self, telegram_id: str) -> None:
+        await self._request(
+            "DELETE",
+            "/reading_reminders",
+            params={"telegram_id": f"eq.{telegram_id}"},
+        )
+
+    async def list_enabled_reminders_for_scheduler(self) -> list[dict[str, Any]]:
+        r = await self._request(
+            "GET",
+            "/reading_reminders",
+            params={
+                "enabled": "eq.true",
+                "select": "id,telegram_id,slot_key,time_local,last_notified_date",
+            },
+        )
+        return r.json()
+
+    async def fetch_users_reminder_context(self, telegram_ids: list[str]) -> dict[str, dict[str, Any]]:
+        if not telegram_ids:
+            return {}
+        ids_csv = ",".join(telegram_ids)
+        r = await self._request(
+            "GET",
+            "/users",
+            params={
+                "telegram_id": f"in.({ids_csv})",
+                "select": "telegram_id,utc_offset_minutes,telegram_language_code",
+            },
+        )
+        out: dict[str, dict[str, Any]] = {}
+        for row in r.json():
+            tid = str(row.get("telegram_id") or "")
+            raw_off = row.get("utc_offset_minutes")
+            try:
+                off = int(raw_off) if raw_off is not None else 0
+            except (TypeError, ValueError):
+                off = 0
+            lang = str(row.get("telegram_language_code") or "en").strip() or "en"
+            if tid:
+                out[tid] = {
+                    "utc_offset_minutes": off,
+                    "telegram_language_code": lang,
+                }
+        return out
+
+    async def patch_reading_reminder_last_notified(self, reminder_id: str, local_date: str) -> None:
+        await self._request(
+            "PATCH",
+            "/reading_reminders",
+            params={"id": f"eq.{reminder_id}"},
+            json_body={"last_notified_date": local_date},
+            prefer="return=minimal",
         )

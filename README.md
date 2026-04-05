@@ -1,6 +1,6 @@
 # Telegram book reading bot (MVP+)
 
-Python 3.11 + [aiogram](https://docs.aiogram.dev/) + Supabase (PostgREST). Sends book paragraphs as chunks, supports FB2/EPUB uploads, per-book progress; **Read** under the paragraph, **Change book** via the bot command menu.
+Python 3.11 + [aiogram](https://docs.aiogram.dev/) + Supabase (PostgREST). Книга по фрагментам, FB2/EPUB, прогресс; под абзацем кнопка **✅ Дальше**, смена книги через меню бота.
 
 ## Project layout
 
@@ -15,11 +15,19 @@ Python 3.11 + [aiogram](https://docs.aiogram.dev/) + Supabase (PostgREST). Sends
 - `services/reading_service.py` — next chunk + `last_read_date`
 - `services/book_seed.py` — sample book preload
 - `handlers/setup.py` — commands, read/change-book callbacks, book picker
+- `handlers/reminders.py` — /reminders, слоты + синхронизация времени с телефона
+- `handlers/keyboards.py` — общая inline-клавиатура **✅ Дальше**
 - `handlers/documents.py` — document upload handler
+- `services/reminder_service.py` — локальное время, фоновые напоминания
+- `services/utc_offset_sync.py` — сдвиг UTC от «времени с телефона»
 - `schema.sql` — full schema (fresh installs)
 - `migrations/001_user_books.sql` — upgrade from older single-table progress
 - `migrations/002_drop_streak.sql` — drop legacy `streak` on `user_books` if present
 - `migrations/003_books_owner.sql` — колонка `books.owner_telegram_id` (список книг у каждого пользователя)
+- `migrations/004_reading_reminders.sql` — таблица `reading_reminders` (+ исторически колонка `timezone`; см. 005)
+- `migrations/005_utc_offset_only.sql` — убрать IANA, добавить `users.utc_offset_minutes` (сдвиг в минутах от UTC)
+- `migrations/006_user_language.sql` — `users.telegram_language_code` для локализации (en, ru, kk)
+- `services/i18n.py` — строки интерфейса и меню команд по языку Telegram
 - `run_seed.py` — опционально загрузить демо для конкретного `telegram_id`
 
 ## Prerequisites
@@ -46,6 +54,10 @@ Run `migrations/002_drop_streak.sql` once.
 ### Личные каталоги книг
 
 Run `migrations/003_books_owner.sql` once. Книги с пустым `owner_telegram_id` не показываются в `/books` (старые глобальные записи).
+
+### Напоминания о чтении
+
+Run `migrations/004_reading_reminders.sql` once, затем **`005`**, затем **`006`** (или актуальный `schema.sql` для новых проектов).
 
 3. Under **Project Settings → API**, copy **Project URL** and **service_role** key.
 
@@ -85,12 +97,14 @@ python bot.py
 - Send **.fb2** or **.epub** — parse, store chunks, set as current book (max size from `MAX_UPLOAD_MB`)
 - **.mobi** — rejected with a clear message (not supported yet)
 - `/books` — **ваши** книги (`owner_telegram_id`), выбор текущей
-- `/read` — next paragraph + inline **✅ Read**; **Change book** is **/books** in the bot menu (☰)
+- `/read` — следующий фрагмент + **✅ Дальше**; смена книги — **/books** в меню (☰)
 - `/stats` — last read date (UTC) and progress for the **current** book
+- `/reminders` — до четырёх слотов. Сначала **время с телефона (ЧЧ:ММ)**, затем меню; для слота — только **время напоминания**. Снова `/reminders` снова просит время для синхронизации. В нужную минуту — сообщение с **✅ Дальше** (не чаще раза в сутки на слот). Переезд / перевод часов — повторите `/reminders`.
 
 ## Data model
 
-- `users` — `telegram_id`, `current_book` (which book is active)
+- `users` — `telegram_id`, `current_book`, **`utc_offset_minutes`**, **`telegram_language_code`** (код языка из Telegram: en, ru, kk; обновляется при запросах)
+- `reading_reminders` — слот (`morning_commute`, `lunch`, `evening_commute`, `before_sleep`), время `HH:MM` в тех же «телефонных» часах, `last_notified_date` по **локальной** дате пользователя (с учётом сдвига)
 - `user_books` — per-user **per-book** `current_position`, `last_read_date` (unique on `telegram_id`, `book_id`)
 - `books` / `chunks` — текст; у книги есть **`owner_telegram_id`** (чужие книги в списке не попадают). Демо по умолчанию: `d-<telegram_id>`.
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from db.client import SupabaseClient, SupabaseError
 from services.book_service import BookService, personal_default_book_id
+from services.i18n import norm_lang
 from services.user_book_service import UserBookService
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,17 @@ class UserService:
                 str(old_ub["last_read_date"])[:10] if old_ub.get("last_read_date") else None,
             )
 
-    async def ensure_user(self, telegram_id: str) -> dict[str, Any]:
+    async def ensure_user(
+        self,
+        telegram_id: str,
+        language_code: str | None = None,
+    ) -> dict[str, Any]:
         bid = personal_default_book_id(telegram_id)
         await self._book_service.ensure_default_book_for_user(telegram_id, bid)
         await self._migrate_legacy_global_sample(telegram_id, bid)
 
         existing = await self._db.fetch_user_by_telegram_id(telegram_id)
+        lang_ui = norm_lang(language_code) if language_code else None
 
         if existing:
             if not existing.get("current_book"):
@@ -58,11 +64,21 @@ class UserService:
                     existing = await self._db.update_user(telegram_id, {"current_book": bid})
                     cur = bid
             await self._user_books.ensure_row(telegram_id, cur)
+            if lang_ui is not None:
+                u = await self._db.fetch_user_by_telegram_id(telegram_id)
+                if u and str(u.get("telegram_language_code") or "") != lang_ui:
+                    await self._db.update_user(telegram_id, {"telegram_language_code": lang_ui})
             fresh = await self._db.fetch_user_by_telegram_id(telegram_id)
             return fresh or existing
 
+        insert_lang = lang_ui if lang_ui is not None else "en"
         try:
-            await self._db.insert_user(telegram_id=telegram_id, current_book=bid)
+            await self._db.insert_user(
+                telegram_id=telegram_id,
+                current_book=bid,
+                utc_offset_minutes=0,
+                telegram_language_code=insert_lang,
+            )
         except SupabaseError:
             logger.exception("Failed to insert user; retrying fetch")
             existing = await self._db.fetch_user_by_telegram_id(telegram_id)
