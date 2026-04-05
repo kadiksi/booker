@@ -63,7 +63,7 @@ def build_router(
             total = ctx.get("total_chunks", 0)
             await message.answer(t(lang, "book_finished", total=total))
             return
-        text = str(ctx["chunk"].get("content", "")).strip()
+        text = str(ctx["chunk"].get("content", "")).rstrip()
         await message.answer(text, reply_markup=reading_keyboard(language_code))
 
     async def send_book_picker(
@@ -155,7 +155,10 @@ def build_router(
 
         completed = int(ub.get("current_position") or 0) if ub else 0
         last = ub.get("last_read_date") if ub else None
-        bid = book_id or "—"
+        book_label = "—"
+        if book_id:
+            book_row = await book_service.get_book(book_id)
+            book_label = (book_row.get("title") if book_row else None) or book_id
 
         if ctx.get("done"):
             progress = t(lang, "stats_progress_done", completed=completed)
@@ -168,7 +171,7 @@ def build_router(
                 lang,
                 "stats_header_last",
                 last=last or "—",
-                bid=bid,
+                bid=book_label,
                 progress=progress,
             )
         )

@@ -1,6 +1,6 @@
 -- Migration: per-book progress (user_books) and slim users table.
 -- Run once in Supabase SQL Editor if you deployed the earlier schema with
--- users.current_position / streak / last_read_date.
+-- users.current_position / last_read_date.
 
 create table if not exists public.user_books (
     id uuid primary key default gen_random_uuid(),
@@ -23,3 +23,5 @@ on conflict (telegram_id, book_id) do nothing;
 alter table public.users drop column if exists current_position;
 alter table public.users drop column if exists streak;
 alter table public.users drop column if exists last_read_date;
+
+alter table public.user_books drop column if exists streak;

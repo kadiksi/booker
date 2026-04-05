@@ -12,11 +12,6 @@ from services.word_chunks import to_reading_chunks
 logger = logging.getLogger(__name__)
 
 
-def personal_default_book_id(telegram_id: str) -> str:
-    """Стабильный id персональной демо-книги для пользователя."""
-    return f"d-{telegram_id}"
-
-
 async def create_book_with_chunks(
     db: SupabaseClient,
     title: str,
@@ -46,24 +41,6 @@ async def create_book_with_chunks(
 class BookService:
     def __init__(self, db: SupabaseClient) -> None:
         self._db = db
-
-    async def ensure_default_book_for_user(self, telegram_id: str, book_id: str) -> None:
-        row = await self._db.fetch_book(book_id)
-        if row and row.get("owner_telegram_id") == telegram_id:
-            return
-        if row:
-            logger.warning("Book id %s already exists with another owner", book_id)
-            return
-        from services.book_seed import _paragraphs
-
-        title = "The Lighthouse Keeper (sample)"
-        await create_book_with_chunks(
-            self._db,
-            title,
-            _paragraphs(),
-            book_id=book_id,
-            owner_telegram_id=telegram_id,
-        )
 
     async def get_book(self, book_id: str) -> dict[str, Any] | None:
         return await self._db.fetch_book(book_id)

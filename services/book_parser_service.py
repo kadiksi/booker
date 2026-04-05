@@ -9,10 +9,38 @@ import ebooklib
 from ebooklib import epub
 from lxml import html
 
+from services.word_chunks import normalize_paragraph_text
+
 logger = logging.getLogger(__name__)
 
 # Не отбрасываем короткие строки — только пустые после нормализации пробелов.
 MIN_PARAGRAPH_LEN = 1
+
+
+def _local_tag(tag: str | bytes) -> str:
+    if not isinstance(tag, str):
+        return ""
+    if "}" in tag:
+        tag = tag.rsplit("}", 1)[-1]
+    return tag.lower()
+
+
+def _html_p_to_text(p: html.HtmlElement) -> str:
+    """Текст <p> с переносами по <br>; отступы и строки внутри абзаца сохраняются."""
+    pieces: list[str] = []
+
+    def add_text(s: str | None) -> None:
+        if s:
+            pieces.append(s)
+
+    add_text(p.text)
+    for child in p:
+        if _local_tag(child.tag) == "br":
+            pieces.append("\n")
+        else:
+            add_text("".join(child.itertext()))
+        add_text(child.tail)
+    return normalize_paragraph_text("".join(pieces))
 
 
 class BookParseError(Exception):
@@ -26,7 +54,7 @@ class UnsupportedFormatError(BookParseError):
 def _clean_paragraphs(raw: list[str], min_len: int = MIN_PARAGRAPH_LEN) -> list[str]:
     out: list[str] = []
     for text in raw:
-        t = " ".join(str(text).split()).strip()
+        t = normalize_paragraph_text(str(text))
         if len(t) >= min_len:
             out.append(t)
     return out
@@ -50,13 +78,13 @@ def parse_fb2(path: str) -> tuple[str | None, list[str]]:
         if name == "book-title" and el.text:
             titles.append(el.text.strip())
         elif name == "p":
-            text = "".join(el.itertext()).strip()
+            text = normalize_paragraph_text("".join(el.itertext()))
             if text:
                 paragraphs.append(text)
 
     if not paragraphs:
         blob = " ".join(t for t in root.itertext() if t and str(t).strip())
-        blob = " ".join(blob.split()).strip()
+        blob = normalize_paragraph_text(blob.replace("\n", " "))
         if blob:
             paragraphs.append(blob)
             logger.info("FB2: no <p> tags, using flat text fallback.")
@@ -91,7 +119,7 @@ def parse_epub(path: str) -> tuple[str | None, list[str]]:
             logger.debug("EPUB: skip HTML document (parse error), continue.")
             continue
         for p in root.xpath("//p"):
-            text = " ".join(t.strip() for t in p.itertext() if t and t.strip())
+            text = _html_p_to_text(p)
             if text:
                 paragraphs.append(text)
 
@@ -105,7 +133,7 @@ def parse_epub(path: str) -> tuple[str | None, list[str]]:
             except Exception:
                 continue
             blob = " ".join(t for t in root.itertext() if t and str(t).strip())
-            blob = " ".join(blob.split()).strip()
+            blob = normalize_paragraph_text(blob.replace("\n", " "))
             if blob:
                 paragraphs.append(blob)
         if paragraphs:

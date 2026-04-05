@@ -35,7 +35,6 @@ async def main() -> None:
     user_service = UserService(
         db,
         user_book_service,
-        book_service,
         settings.sample_book_id,
     )
     reading_service = ReadingService(db)

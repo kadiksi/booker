@@ -1,4 +1,4 @@
-"""Склеивание абзацев в чанки; при невозможности уложиться в лимиты слов — чанк на каждый абзац."""
+"""Склеивание абзацев в чанки; границы только между абзацами; в тексте сохраняются переносы и отступы."""
 
 from __future__ import annotations
 
@@ -9,14 +9,21 @@ logger = logging.getLogger(__name__)
 MIN_CHUNK_WORDS = 300
 MAX_CHUNK_WORDS = 550
 
+_PARA_BREAK = "\n\n"
 
-def _flat_words(paragraphs: list[str]) -> list[str]:
-    words: list[str] = []
-    for p in paragraphs:
-        p = (p or "").strip()
-        if p:
-            words.extend(p.split())
-    return words
+
+def normalize_paragraph_text(text: str) -> str:
+    """Убирает пустые строки по краям и хвостовые пробелы строк; красная строка и внутренние \\n сохраняются."""
+    lines = [ln.rstrip() for ln in str(text).splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    while lines and not lines[0]:
+        lines.pop(0)
+    return "\n".join(lines)
+
+
+def _word_count(paragraph: str) -> int:
+    return len((paragraph or "").split())
 
 
 def merge_paragraphs_to_reading_chunks(
@@ -25,48 +32,72 @@ def merge_paragraphs_to_reading_chunks(
     max_words: int = MAX_CHUNK_WORDS,
 ) -> list[str]:
     """
-    Объединяет абзацы в чанки ~min_words..max_words слов.
-    Короткая книга — один чанк; последний чанк может быть короче min_words.
+    Склеивает целые абзацы в чанки ~min_words..max_words (по числу слов).
+    Абзацы в одном чанке разделяются пустой строкой, как в книге.
     """
     if min_words > max_words or min_words < 1:
         raise ValueError("min_words must be >= 1 and <= max_words")
 
-    words = _flat_words(paragraphs)
-    if not words:
+    paras = _normalize_paragraph_list(paragraphs)
+    if not paras:
         return []
 
-    if len(words) <= max_words:
-        return [" ".join(words)]
+    total_words = sum(_word_count(p) for p in paras)
+    if total_words <= max_words:
+        return [_PARA_BREAK.join(paras)]
 
     chunks: list[list[str]] = []
     i = 0
-    n = len(words)
+    n = len(paras)
 
     while i < n:
-        rem = n - i
-        if rem <= max_words:
-            tail = words[i:n]
-            if len(tail) >= min_words or not chunks:
+        rem_words = sum(_word_count(paras[j]) for j in range(i, n))
+        if rem_words <= max_words:
+            tail = paras[i:n]
+            tw = sum(_word_count(p) for p in tail)
+            if tw >= min_words or not chunks:
                 chunks.append(tail)
-            elif chunks and len(chunks[-1]) + len(tail) <= max_words:
+            elif chunks and sum(_word_count(p) for p in chunks[-1]) + tw <= max_words:
                 chunks[-1].extend(tail)
             else:
                 chunks.append(tail)
             break
 
-        take = min(max_words, rem - min_words)
-        if take < min_words:
-            take = min_words
-        chunks.append(words[i : i + take])
-        i += take
+        block: list[str] = []
+        bw = 0
+        while i < n:
+            p = paras[i]
+            pw = _word_count(p)
+            if pw > max_words:
+                if block:
+                    chunks.append(block)
+                    block = []
+                    bw = 0
+                chunks.append([p])
+                i += 1
+                break
+            if not block:
+                block.append(p)
+                bw = pw
+                i += 1
+                continue
+            if bw >= min_words and bw + pw > max_words:
+                break
+            block.append(p)
+            bw += pw
+            i += 1
+            if bw > max_words:
+                break
+        if block:
+            chunks.append(block)
 
-    return [" ".join(c) for c in chunks]
+    return [_PARA_BREAK.join(c) for c in chunks]
 
 
 def _normalize_paragraph_list(paragraphs: list[str]) -> list[str]:
     out: list[str] = []
     for p in paragraphs:
-        t = " ".join((p or "").split()).strip()
+        t = normalize_paragraph_text(p)
         if t:
             out.append(t)
     return out
@@ -81,7 +112,7 @@ def to_reading_chunks(paragraphs: list[str]) -> list[str]:
     if not normalized:
         return []
 
-    word_total = len(_flat_words(normalized))
+    word_total = sum(_word_count(p) for p in normalized)
     if word_total < MIN_CHUNK_WORDS:
         return list(normalized)
 
