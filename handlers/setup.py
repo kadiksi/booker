@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from db.client import SupabaseClient, SupabaseError
 from handlers.documents import build_document_router
 from handlers.keyboards import NAV_READ, reading_keyboard
+from handlers.telegram_text import split_for_telegram
 from handlers.reminders import build_reminder_router
 from services.book_parser_service import BookParserService
 from services.book_service import BookService
@@ -64,7 +65,15 @@ def build_router(
             await message.answer(t(lang, "book_finished", total=total))
             return
         text = str(ctx["chunk"].get("content", "")).rstrip()
-        await message.answer(text, reply_markup=reading_keyboard(language_code))
+        segments = split_for_telegram(text)
+        if not segments:
+            segments = ["…"]
+        kb = reading_keyboard(language_code)
+        for i, seg in enumerate(segments):
+            await message.answer(
+                seg,
+                reply_markup=kb if i == len(segments) - 1 else None,
+            )
 
     async def send_book_picker(
         message: Message,
