@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import html as html_std
 import logging
+import re
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -21,6 +24,15 @@ from services.user_book_service import UserBookService
 from services.user_service import UserService
 
 logger = logging.getLogger(__name__)
+
+_HTML_TAG_RE = re.compile("<[^>]*>")
+
+
+def _telegram_html_fallback(telegram_html: str) -> str:
+    """Если разметка не принята Telegram — показать без тегов."""
+    plain = _HTML_TAG_RE.sub("", telegram_html)
+    return html_std.unescape(plain) or "…"
+
 
 NAV_BOOKS = "nav:books"
 PICK_PREFIX = "pick:"
@@ -64,7 +76,18 @@ def build_router(
             await message.answer(t(lang, "book_finished", total=total))
             return
         text = str(ctx["chunk"].get("content", "")).rstrip()
-        await message.answer(text or "…", reply_markup=reading_keyboard(language_code))
+        try:
+            await message.answer(
+                text or "…",
+                parse_mode="HTML",
+                reply_markup=reading_keyboard(language_code),
+            )
+        except TelegramBadRequest:
+            logger.warning("HTML parse failed for chunk, sending plain fallback")
+            await message.answer(
+                _telegram_html_fallback(text) if text else "…",
+                reply_markup=reading_keyboard(language_code),
+            )
 
     async def send_book_picker(
         message: Message,

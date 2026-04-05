@@ -7,7 +7,8 @@ import uuid
 from typing import Any
 
 from db.client import SupabaseClient, SupabaseError
-from services.word_chunks import to_reading_chunks
+from services.rich_text import TextSpan
+from services.word_chunks import to_reading_chunks_from_spans
 
 logger = logging.getLogger(__name__)
 
@@ -15,14 +16,14 @@ logger = logging.getLogger(__name__)
 async def create_book_with_chunks(
     db: SupabaseClient,
     title: str,
-    paragraphs: list[str],
+    paragraphs: list[list[TextSpan]],
     book_id: str | None = None,
     owner_telegram_id: str | None = None,
 ) -> dict[str, Any]:
     if not paragraphs:
         raise SupabaseError("No paragraphs to store")
 
-    merged = to_reading_chunks(paragraphs)
+    merged = to_reading_chunks_from_spans(paragraphs)
     if not merged:
         raise SupabaseError("No paragraphs to store")
 
@@ -51,7 +52,7 @@ class BookService:
     async def create_from_paragraphs(
         self,
         title: str,
-        paragraphs: list[str],
+        paragraphs: list[list[TextSpan]],
         owner_telegram_id: str,
         preferred_id: str | None = None,
     ) -> dict[str, Any]:
