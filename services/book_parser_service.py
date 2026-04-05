@@ -11,7 +11,8 @@ from lxml import html
 
 logger = logging.getLogger(__name__)
 
-MIN_PARAGRAPH_LEN = 20
+# Не отбрасываем короткие строки — только пустые после нормализации пробелов.
+MIN_PARAGRAPH_LEN = 1
 
 
 class BookParseError(Exception):
@@ -53,6 +54,13 @@ def parse_fb2(path: str) -> tuple[str | None, list[str]]:
             if text:
                 paragraphs.append(text)
 
+    if not paragraphs:
+        blob = " ".join(t for t in root.itertext() if t and str(t).strip())
+        blob = " ".join(blob.split()).strip()
+        if blob:
+            paragraphs.append(blob)
+            logger.info("FB2: no <p> tags, using flat text fallback.")
+
     title = titles[0] if titles else None
     return title, _clean_paragraphs(paragraphs)
 
@@ -80,11 +88,28 @@ def parse_epub(path: str) -> tuple[str | None, list[str]]:
         try:
             root = html.document_fromstring(data)
         except Exception:
+            logger.debug("EPUB: skip HTML document (parse error), continue.")
             continue
         for p in root.xpath("//p"):
             text = " ".join(t.strip() for t in p.itertext() if t and t.strip())
             if text:
                 paragraphs.append(text)
+
+    if not paragraphs:
+        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+            data = item.get_content()
+            if not data:
+                continue
+            try:
+                root = html.document_fromstring(data)
+            except Exception:
+                continue
+            blob = " ".join(t for t in root.itertext() if t and str(t).strip())
+            blob = " ".join(blob.split()).strip()
+            if blob:
+                paragraphs.append(blob)
+        if paragraphs:
+            logger.info("EPUB: no <p> tags, used full-text fallback from HTML items.")
 
     return title, _clean_paragraphs(paragraphs)
 

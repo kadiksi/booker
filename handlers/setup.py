@@ -64,15 +64,15 @@ def build_router(
         text = str(ctx["chunk"].get("content", "")).strip()
         await message.answer(text, reply_markup=reading_keyboard())
 
-    async def send_book_picker(message: Message) -> None:
+    async def send_book_picker(message: Message, telegram_id: str) -> None:
         try:
-            books = await book_service.list_books()
+            books = await book_service.list_books_for_user(telegram_id)
         except SupabaseError:
-            logger.exception("list_books failed")
+            logger.exception("list_books_for_user failed")
             await message.answer("Could not load the catalog. Try again later.")
             return
         if not books:
-            await message.answer("No books yet. Upload an .fb2 or .epub file.")
+            await message.answer("No books in your library yet. Send an .fb2 or .epub file.")
             return
         kb = InlineKeyboardBuilder()
         for b in books:
@@ -112,7 +112,7 @@ def build_router(
         except SupabaseError:
             await message.answer("Could not verify your account.")
             return
-        await send_book_picker(message)
+        await send_book_picker(message, str(message.from_user.id))
 
     @router.message(Command("read"))
     async def cmd_read(message: Message) -> None:
@@ -164,7 +164,7 @@ def build_router(
         except SupabaseError:
             await callback.message.answer("Could not verify your account.")
             return
-        await send_book_picker(callback.message)
+        await send_book_picker(callback.message, str(callback.from_user.id))
 
     @router.callback_query(F.data.startswith(PICK_PREFIX))
     async def on_book_picked(callback: CallbackQuery) -> None:
@@ -177,6 +177,9 @@ def build_router(
             book = await book_service.get_book(book_id)
             if not book:
                 await callback.answer("Book not found.", show_alert=True)
+                return
+            if book.get("owner_telegram_id") != telegram_id:
+                await callback.answer("This book is not in your library.", show_alert=True)
                 return
             await user_book_service.switch_current_book(telegram_id, book_id)
         except SupabaseError:

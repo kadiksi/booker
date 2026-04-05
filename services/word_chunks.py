@@ -1,6 +1,10 @@
-"""Склеивание исходных абзацев в чанки для чтения по числу слов."""
+"""Склеивание абзацев в чанки; при невозможности уложиться в лимиты слов — чанк на каждый абзац."""
 
 from __future__ import annotations
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 MIN_CHUNK_WORDS = 300
 MAX_CHUNK_WORDS = 550
@@ -21,11 +25,8 @@ def merge_paragraphs_to_reading_chunks(
     max_words: int = MAX_CHUNK_WORDS,
 ) -> list[str]:
     """
-    Объединяет абзацы так, чтобы в каждом чанке было не меньше min_words
-    и не больше max_words слов.
-
-    Очень короткая книга целиком попадает в один чанк (даже если слов < min_words).
-    Последний чанк может быть короче min_words, если иначе нельзя уложиться в max_words.
+    Объединяет абзацы в чанки ~min_words..max_words слов.
+    Короткая книга — один чанк; последний чанк может быть короче min_words.
     """
     if min_words > max_words or min_words < 1:
         raise ValueError("min_words must be >= 1 and <= max_words")
@@ -60,3 +61,35 @@ def merge_paragraphs_to_reading_chunks(
         i += take
 
     return [" ".join(c) for c in chunks]
+
+
+def _normalize_paragraph_list(paragraphs: list[str]) -> list[str]:
+    out: list[str] = []
+    for p in paragraphs:
+        t = " ".join((p or "").split()).strip()
+        if t:
+            out.append(t)
+    return out
+
+
+def to_reading_chunks(paragraphs: list[str]) -> list[str]:
+    """
+    Если всего слов меньше минимума для «больших» чанков — по одному чанку на абзац как из файла.
+    Иначе склейка ~300–550 слов; при сбое алгоритма — снова по абзацам.
+    """
+    normalized = _normalize_paragraph_list(paragraphs)
+    if not normalized:
+        return []
+
+    word_total = len(_flat_words(normalized))
+    if word_total < MIN_CHUNK_WORDS:
+        return list(normalized)
+
+    try:
+        merged = merge_paragraphs_to_reading_chunks(normalized)
+        if merged:
+            return merged
+    except ValueError as e:
+        logger.warning("Word-chunk rules skipped, using raw paragraphs: %s", e)
+
+    return list(normalized)

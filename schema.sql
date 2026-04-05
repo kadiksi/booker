@@ -3,8 +3,11 @@
 
 create table if not exists public.books (
     id text primary key,
-    title text not null
+    title text not null,
+    owner_telegram_id text
 );
+
+create index if not exists idx_books_owner on public.books (owner_telegram_id);
 
 create table if not exists public.chunks (
     id serial primary key,

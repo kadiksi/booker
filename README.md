@@ -11,7 +11,7 @@ Python 3.11 + [aiogram](https://docs.aiogram.dev/) + Supabase (PostgREST). Sends
 - `services/book_service.py` — create/list books
 - `services/user_book_service.py` — `user_books` progress rows
 - `services/user_service.py` — `users` row + default book
-- `services/word_chunks.py` — склейка абзацев в чанки ~300–550 слов
+- `services/word_chunks.py` — чанки ~300–550 слов при длинном тексте; иначе один шаг на абзац как в файле
 - `services/reading_service.py` — next chunk + `last_read_date`
 - `services/book_seed.py` — sample book preload
 - `handlers/setup.py` — commands, read/change-book callbacks, book picker
@@ -19,7 +19,8 @@ Python 3.11 + [aiogram](https://docs.aiogram.dev/) + Supabase (PostgREST). Sends
 - `schema.sql` — full schema (fresh installs)
 - `migrations/001_user_books.sql` — upgrade from older single-table progress
 - `migrations/002_drop_streak.sql` — drop legacy `streak` on `user_books` if present
-- `run_seed.py` — load sample book
+- `migrations/003_books_owner.sql` — колонка `books.owner_telegram_id` (список книг у каждого пользователя)
+- `run_seed.py` — опционально загрузить демо для конкретного `telegram_id`
 
 ## Prerequisites
 
@@ -42,6 +43,10 @@ Python 3.11 + [aiogram](https://docs.aiogram.dev/) + Supabase (PostgREST). Sends
 
 Run `migrations/002_drop_streak.sql` once.
 
+### Личные каталоги книг
+
+Run `migrations/003_books_owner.sql` once. Книги с пустым `owner_telegram_id` не показываются в `/books` (старые глобальные записи).
+
 3. Under **Project Settings → API**, copy **Project URL** and **service_role** key.
 
 ## Local configuration
@@ -57,13 +62,15 @@ cp .env.example .env
 `.env`:
 
 - `BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_KEY`
-- `SAMPLE_BOOK_ID` (optional)
+- `SAMPLE_BOOK_ID` — id **старой** общей демо-книги (`sample-parable`) только для переноса прогресса при миграции; демо теперь создаётся автоматически как `d-<telegram_id>`.
 - `MAX_UPLOAD_MB` (optional, default `10`)
 
-Seed the sample book once:
+Демо при первом `/start` создаётся само. Ручной seed для своего аккаунта (после деплоя):
 
 ```bash
-python run_seed.py
+SEED_TELEGRAM_ID=123456789 python run_seed.py
+# или
+python run_seed.py 123456789
 ```
 
 Run:
@@ -77,7 +84,7 @@ python bot.py
 - `/start` — register user, default sample book, ensure `user_books` row
 - Send **.fb2** or **.epub** — parse, store chunks, set as current book (max size from `MAX_UPLOAD_MB`)
 - **.mobi** — rejected with a clear message (not supported yet)
-- `/books` — inline list of books → pick current book and resume progress
+- `/books` — **ваши** книги (`owner_telegram_id`), выбор текущей
 - `/read` — next paragraph + inline **✅ Read**; **Change book** is **/books** in the bot menu (☰)
 - `/stats` — last read date (UTC) and progress for the **current** book
 
@@ -85,9 +92,9 @@ python bot.py
 
 - `users` — `telegram_id`, `current_book` (which book is active)
 - `user_books` — per-user **per-book** `current_position`, `last_read_date` (unique on `telegram_id`, `book_id`)
-- `books` / `chunks` — catalog text (`chunks.position` is 1-based)
+- `books` / `chunks` — текст; у книги есть **`owner_telegram_id`** (чужие книги в списке не попадают). Демо по умолчанию: `d-<telegram_id>`.
 
-`current_position` = число **прочитанных чанков**; каждый чанк — примерно **300–550** слов (исходные абзацы склеиваются). Очень короткая книга может дать один чанк меньше 300 слов; последний чанк длинной книги иногда короче 300, если иначе нельзя уложиться в максимум.
+`current_position` = число **прочитанных чанков**. Если в книге всего **меньше 300 слов**, чанк = **один исходный абзац** (как распарсился). Если текста больше — склейка в куски **~300–550** слов; при проблемах со склейкой снова режем **по абзацам**. Короткие `<p>` не выкидываются; EPUB без `<p>` — fallback на весь текст HTML; куски без текста пропускаются, парсинг идёт дальше.
 
 Следующий фрагмент в чате — chunk с индексом `current_position + 1`.
 

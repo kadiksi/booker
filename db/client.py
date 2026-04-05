@@ -121,12 +121,20 @@ class SupabaseClient:
         )
         return len(r.json())
 
-    async def upsert_book(self, book_id: str, title: str) -> None:
-        """Insert book or update title if id already exists (handles 409 without relying on merge-duplicates)."""
+    async def upsert_book(
+        self,
+        book_id: str,
+        title: str,
+        owner_telegram_id: str | None = None,
+    ) -> None:
+        """Insert book or update title/owner if id already exists (handles 409)."""
+        payload: dict[str, Any] = {"id": book_id, "title": title}
+        if owner_telegram_id is not None:
+            payload["owner_telegram_id"] = owner_telegram_id
         try:
             response = await self._client.post(
                 "/books",
-                json={"id": book_id, "title": title},
+                json=payload,
                 headers={**self._headers, "Prefer": "return=minimal"},
             )
         except httpx.RequestError as e:
@@ -136,11 +144,14 @@ class SupabaseClient:
         if response.status_code in (200, 201):
             return
         if response.status_code == 409:
+            patch: dict[str, Any] = {"title": title}
+            if owner_telegram_id is not None:
+                patch["owner_telegram_id"] = owner_telegram_id
             await self._request(
                 "PATCH",
                 "/books",
                 params={"id": f"eq.{book_id}"},
-                json_body={"title": title},
+                json_body=patch,
                 prefer="return=minimal",
             )
             return
@@ -156,11 +167,14 @@ class SupabaseClient:
     async def delete_chunks_for_book(self, book_id: str) -> None:
         await self._request("DELETE", "/chunks", params={"book_id": f"eq.{book_id}"})
 
-    async def list_books(self) -> list[dict[str, Any]]:
+    async def list_books_for_owner(self, telegram_id: str) -> list[dict[str, Any]]:
         r = await self._request(
             "GET",
             "/books",
-            params={"select": "id,title"},
+            params={
+                "owner_telegram_id": f"eq.{telegram_id}",
+                "select": "id,title,owner_telegram_id",
+            },
         )
         rows = r.json()
         rows.sort(key=lambda x: (x.get("title") or "").lower())
@@ -235,3 +249,13 @@ class SupabaseClient:
 
     async def delete_book_cascade(self, book_id: str) -> None:
         await self._request("DELETE", "/books", params={"id": f"eq.{book_id}"})
+
+    async def delete_user_book_row(self, telegram_id: str, book_id: str) -> None:
+        await self._request(
+            "DELETE",
+            "/user_books",
+            params={
+                "telegram_id": f"eq.{telegram_id}",
+                "book_id": f"eq.{book_id}",
+            },
+        )

@@ -77,7 +77,7 @@ def build_document_router(
             )
             if not paragraphs:
                 await status.edit_text(
-                    "No usable paragraphs found (need at least one paragraph of 20+ characters)."
+                    "Не удалось извлечь текст из файла (пусто или неподдерживаемая вёрстка)."
                 )
                 return
 
@@ -85,6 +85,7 @@ def build_document_router(
             summary = await book_service.create_from_paragraphs(
                 title or default_title,
                 paragraphs,
+                owner_telegram_id=telegram_id,
             )
             await user_service.ensure_user(telegram_id)
             await user_book_service.switch_current_book(telegram_id, summary["id"])

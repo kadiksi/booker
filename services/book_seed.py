@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from db.client import SupabaseClient, SupabaseError
-from services.word_chunks import merge_paragraphs_to_reading_chunks
+from services.word_chunks import to_reading_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -82,18 +82,22 @@ def _paragraphs() -> list[str]:
     return raw
 
 
-async def preload_sample_book(db: SupabaseClient, book_id: str, title: str | None = None) -> dict[str, Any]:
+async def preload_sample_book(
+    db: SupabaseClient,
+    book_id: str,
+    title: str | None = None,
+    owner_telegram_id: str | None = None,
+) -> dict[str, Any]:
     """
-    Ensures the book row exists and replaces chunks with the bundled sample text.
-    Safe to run multiple times.
+    Загрузка примера в БД (для ручного seed). Укажите owner_telegram_id — иначе книга не попадёт в /users.
     """
     if not title:
         title = "The Lighthouse Keeper (sample)"
 
     paragraphs = _paragraphs()
-    merged = merge_paragraphs_to_reading_chunks(paragraphs)
+    merged = to_reading_chunks(paragraphs)
     try:
-        await db.upsert_book(book_id, title)
+        await db.upsert_book(book_id, title, owner_telegram_id)
         await db.delete_chunks_for_book(book_id)
         rows = [{"book_id": book_id, "position": i + 1, "content": text} for i, text in enumerate(merged)]
         await db.insert_chunks_bulk(rows)

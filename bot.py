@@ -29,10 +29,15 @@ async def main() -> None:
     dp = Dispatcher()
 
     db = SupabaseClient(settings.supabase_url, settings.supabase_key)
-    user_book_service = UserBookService(db)
-    user_service = UserService(db, settings.sample_book_id, user_book_service)
-    reading_service = ReadingService(db)
     book_service = BookService(db)
+    user_book_service = UserBookService(db)
+    user_service = UserService(
+        db,
+        user_book_service,
+        book_service,
+        settings.sample_book_id,
+    )
+    reading_service = ReadingService(db)
     book_parser = BookParserService()
 
     dp.include_router(
